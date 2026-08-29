@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { audioMergeFingerprint, buildPlan, mergeStateCanRecover } from "../src/audio";
 import { DEFAULT_CONFIG } from "../src/config";
 
@@ -45,14 +47,14 @@ describe("audio planning", () => {
     expect(mergeStateCanRecover({
       version: 1,
       fingerprint,
-      temporary: "/tmp/book.mp3.123.tmp.mp3",
+      temporary: join(tmpdir(), "yonde-merge-test", "book.mp3.tmp.mp3"),
       status: "complete",
       expectedSeconds: 10,
     }, fingerprint, "/tmp/book.mp3")).toBe(true);
     expect(mergeStateCanRecover({
       version: 1,
       fingerprint,
-      temporary: "/tmp/book.mp3.123.tmp.mp3",
+      temporary: join(tmpdir(), "yonde-merge-test", "book.mp3.tmp.mp3"),
       status: "merging",
       expectedSeconds: 10,
     }, fingerprint, "/tmp/book.mp3")).toBe(false);

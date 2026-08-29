@@ -1,6 +1,7 @@
 import { EdgeTTS } from "node-edge-tts";
-import { lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppConfig, VoiceProfile } from "./config";
@@ -118,17 +119,22 @@ export function audioMergeFingerprint(value: Omit<AudioManifest, "version" | "me
   return new Bun.CryptoHasher("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-export function mergeStateCanRecover(value: unknown, fingerprint: string, outputPath: string): value is MergeState {
+function mergeTemporaryIsSafe(value: unknown, outputPath: string): value is MergeState {
   if (!value || typeof value !== "object") return false;
   const state = value as Partial<MergeState>;
-  const prefix = `${basename(outputPath)}.`;
+  return typeof state.temporary === "string"
+    && dirname(dirname(state.temporary)) === tmpdir()
+    && basename(dirname(state.temporary)).startsWith("yonde-merge-")
+    && basename(state.temporary) === `${basename(outputPath)}.tmp.mp3`;
+}
+
+export function mergeStateCanRecover(value: unknown, fingerprint: string, outputPath: string): value is MergeState {
+  if (!mergeTemporaryIsSafe(value, outputPath)) return false;
+  const state = value as Partial<MergeState>;
   return state.version === 1
     && state.status === "complete"
     && state.fingerprint === fingerprint
-    && typeof state.temporary === "string"
-    && dirname(state.temporary) === dirname(outputPath)
-    && basename(state.temporary).startsWith(prefix)
-    && basename(state.temporary).endsWith(".tmp.mp3");
+    && typeof state.expectedSeconds === "number";
 }
 
 async function temporaryOutputs(outputPath: string): Promise<string[]> {
@@ -152,16 +158,35 @@ async function estimateDurationSeconds(items: AudioItem[]): Promise<number> {
   return Math.max(1, bytes * 8 / 96_000);
 }
 
+async function installMergedOutput(source: string, outputPath: string): Promise<void> {
+  const staged = `${outputPath}.${process.pid}.${randomUUID()}.tmp.mp3`;
+  try {
+    await copyFile(source, staged);
+    await rename(staged, outputPath);
+  } catch (error) {
+    await rm(staged, { force: true });
+    throw error;
+  }
+}
+
 async function recoverCompletedMerge(outputPath: string, stateDir: string, fingerprint: string): Promise<boolean> {
   const statePath = join(stateDir, "audio-merge-state.json");
   const state = await readJson<unknown>(statePath);
   if (!mergeStateCanRecover(state, fingerprint, outputPath) || !(await fileIsUsable(state.temporary))) return false;
-  await rename(state.temporary, outputPath);
+  await installMergedOutput(state.temporary, outputPath);
+  await rm(dirname(state.temporary), { recursive: true, force: true });
   await rm(statePath, { force: true });
   for (const stale of await temporaryOutputs(outputPath)) await rm(stale, { force: true });
   const progress = new ProgressBar("恢复", 1);
   progress.finish("已恢复完成的合并结果");
   return true;
+}
+
+async function discardStaleMerge(outputPath: string, stateDir: string): Promise<void> {
+  const statePath = join(stateDir, "audio-merge-state.json");
+  const state = await readJson<unknown>(statePath);
+  if (mergeTemporaryIsSafe(state, outputPath)) await rm(dirname(state.temporary), { recursive: true, force: true });
+  await rm(statePath, { force: true });
 }
 
 async function readFfmpegProgress(stream: ReadableStream<Uint8Array>, progress: ProgressBar, totalSeconds: number): Promise<void> {
@@ -193,7 +218,8 @@ async function runFfmpeg(
   const paths = items.map((item) => relative(stateDir, item.path));
   if (paths.some((path) => path.startsWith("..") || /[\r\n\0]/.test(path))) throw new Error("音频缓存路径超出状态目录或含控制字符");
   await atomicWrite(listPath, paths.map((path) => `file '${escapeConcatPath(path)}'`).join("\n") + "\n");
-  const temporary = `${outputPath}.${process.pid}.${randomUUID()}.tmp.mp3`;
+  const temporaryDir = await mkdtemp(join(tmpdir(), "yonde-merge-"));
+  const temporary = join(temporaryDir, `${basename(outputPath)}.tmp.mp3`);
   const mergeStatePath = join(stateDir, "audio-merge-state.json");
   const expectedSeconds = await estimateDurationSeconds(items);
   const progress = new ProgressBar("合并", expectedSeconds);
@@ -216,7 +242,7 @@ async function runFfmpeg(
   const stderr = await stderrReader;
   if (exitCode !== 0) {
     progress.fail(`退出码 ${exitCode}`);
-    await rm(temporary, { force: true });
+    await rm(temporaryDir, { recursive: true, force: true });
     await rm(mergeStatePath, { force: true });
     const detail = stderr.trim().split("\n").at(-1);
     throw new Error(`ffmpeg 合并失败，退出码 ${exitCode}${detail ? `: ${detail}` : ""}`);
@@ -229,7 +255,8 @@ async function runFfmpeg(
     expectedSeconds,
   } satisfies MergeState);
   progress.finish(`${items.length} 个片段`);
-  await rename(temporary, outputPath);
+  await installMergedOutput(temporary, outputPath);
+  await rm(temporaryDir, { recursive: true, force: true });
   await rm(mergeStatePath, { force: true });
 }
 
@@ -352,6 +379,7 @@ export async function buildAudio(
   };
   const mergeFingerprint = audioMergeFingerprint(manifestBody);
   if (await recoverCompletedMerge(outputPath, stateDir, mergeFingerprint)) return;
+  await discardStaleMerge(outputPath, stateDir);
   const stale = await temporaryOutputs(outputPath);
   if (stale.length) console.warn(`发现 ${stale.length} 个未完成的合并临时文件，将保留语音缓存并重新合并。`);
   for (const path of stale) await rm(path, { force: true });
