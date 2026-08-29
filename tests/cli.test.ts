@@ -18,7 +18,7 @@ describe("CLI arguments", () => {
   });
 
   test("documents every command and option in help", () => {
-    for (const text of ["Yonde", "--stage", "--config", "--output-dir", "config check", "init", "@makuraryu/yonde"]) {
+    for (const text of ["Yonde", "--stage", "--config", "--output-dir", "config check", "init", "github:Makuraryu/Yonde"]) {
       expect(HELP_TEXT).toContain(text);
     }
   });

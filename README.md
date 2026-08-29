@@ -7,19 +7,18 @@ Yonde（読んで）是一个配置驱动的 Bun CLI：把日文文本翻译成�
 需要 [Bun](https://bun.sh/) 1.3 或更新版本。生成 MP3 时还需要 `ffmpeg`；只运行翻译阶段则不需要。
 
 ```bash
-bunx @makuraryu/yonde init
+bunx github:Makuraryu/Yonde init
 
 # 默认配置从这个环境变量读取 DeepSeek API Key
 export JPNS_DEEPSEEK_API_KEY="your-api-key"
 
-bunx @makuraryu/yonde input.txt
+bunx github:Makuraryu/Yonde input.txt
 ```
 
-如果已经全局安装，命令为 `yonde`：
+这会直接从公开 GitHub 仓库安装并运行，不需要 npm 发布。若要锁定版本，可以使用 release 标签：
 
 ```bash
-bun add --global @makuraryu/yonde
-yonde input.txt
+bunx github:Makuraryu/Yonde#v0.3.0 input.txt
 ```
 
 ## 命令
@@ -34,21 +33,21 @@ yonde config check [--config <配置文件>]
 
 ```bash
 # 翻译并生成音频
-bunx @makuraryu/yonde input.txt
+bunx github:Makuraryu/Yonde input.txt
 
 # 只翻译，或使用已有翻译生成音频
-bunx @makuraryu/yonde input.txt --stage translate
-bunx @makuraryu/yonde input.txt --stage audio
+bunx github:Makuraryu/Yonde input.txt --stage translate
+bunx github:Makuraryu/Yonde input.txt --stage audio
 
 # 指定配置和输出目录
-bunx @makuraryu/yonde input.txt --config ./custom.toml --output-dir ./build
+bunx github:Makuraryu/Yonde input.txt --config ./custom.toml --output-dir ./build
 
 # 检查最终合并后的配置
-bunx @makuraryu/yonde config check
-bunx @makuraryu/yonde config check --config ./custom.toml
+bunx github:Makuraryu/Yonde config check
+bunx github:Makuraryu/Yonde config check --config ./custom.toml
 
 # 查看完整帮助
-bunx @makuraryu/yonde --help
+bunx github:Makuraryu/Yonde --help
 ```
 
 `init` 默认创建 `./jpns.toml`，且不会覆盖已有文件。
@@ -166,7 +165,7 @@ bun run check
 bun run src/main.ts --help
 ```
 
-## 发布检查
+## npm 发布（可选）
 
 ```bash
 bun run check
@@ -174,6 +173,8 @@ bun test
 npm pack --dry-run
 npm publish --access public
 ```
+
+Yonde 不依赖 npm 发布即可通过上面的 `github:Makuraryu/Yonde` 包标识运行。npm 发布只是提供更短的 registry 包名。
 
 ## License
 

@@ -37,11 +37,11 @@ export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料
   > ~/.config/jpns/config.toml > 内置默认值
 
 示例:
-  bunx @makuraryu/yonde input.txt
-  bunx @makuraryu/yonde input.txt --stage translate
-  bunx @makuraryu/yonde input.txt --config ./jpns.toml
-  bunx @makuraryu/yonde config check
-  bunx @makuraryu/yonde init
+  bunx github:Makuraryu/Yonde input.txt
+  bunx github:Makuraryu/Yonde input.txt --stage translate
+  bunx github:Makuraryu/Yonde input.txt --config ./jpns.toml
+  bunx github:Makuraryu/Yonde config check
+  bunx github:Makuraryu/Yonde init
 
 环境变量:
   JPNS_DEEPSEEK_API_KEY  默认翻译 API Key
