@@ -15,11 +15,7 @@ export JPNS_DEEPSEEK_API_KEY="your-api-key"
 bunx github:Makuraryu/Yonde input.txt
 ```
 
-这会直接从公开 GitHub 仓库安装并运行，不需要 npm 发布。若要锁定版本，可以使用 release 标签：
-
-```bash
-bunx github:Makuraryu/Yonde#v0.3.0 input.txt
-```
+这会直接从公开 GitHub 仓库的默认分支安装并运行，不需要 npm 发布。版本记录可在 [GitHub Releases](https://github.com/Makuraryu/Yonde/releases) 查看。
 
 ## 命令
 
