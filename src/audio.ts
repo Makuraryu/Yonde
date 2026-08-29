@@ -47,11 +47,18 @@ function specHash(spec: AudioSpec): string {
     .slice(0, 24);
 }
 
-async function synthesize(spec: AudioSpec, cacheDir: string, ffmpegPath: string): Promise<SynthesisResult> {
+async function synthesize(
+  spec: AudioSpec,
+  cacheDir: string,
+  ffmpegPath: string,
+  existingCacheNames: ReadonlySet<string>,
+): Promise<SynthesisResult> {
   const hash = specHash(spec);
   const safeId = spec.kind.replace(/[^a-zA-Z0-9_-]/g, "_");
   const output = join(cacheDir, `${safeId}-${hash}.mp3`);
-  if (await fileIsUsable(output)) return { path: output, cached: true };
+  // Cache files are atomically renamed after a successful synthesis. A single
+  // directory listing avoids thousands of slow per-file metadata reads on iCloud.
+  if (existingCacheNames.has(basename(output))) return { path: output, cached: true };
 
   const temporary = `${output}.${process.pid}.${randomUUID()}.part.mp3`;
   if (!/[\p{L}\p{N}]/u.test(spec.text)) {
@@ -273,7 +280,9 @@ export async function buildAudio(
   if (!ffmpegPath) throw new Error("找不到 ffmpeg；请先安装 ffmpeg，或仅运行 --stage translate");
   const cacheDir = join(stateDir, "audio-cache");
   await mkdir(cacheDir, { recursive: true });
-  for (const entry of await readdir(cacheDir)) if (entry.endsWith(".part.mp3")) await rm(join(cacheDir, entry), { force: true });
+  const cacheEntries = await readdir(cacheDir);
+  for (const entry of cacheEntries) if (entry.endsWith(".part.mp3")) await rm(join(cacheDir, entry), { force: true });
+  const existingCacheNames = new Set(cacheEntries.filter((entry) => entry.endsWith(".mp3")));
   const outputDir = dirname(outputPath);
   await mkdir(outputDir, { recursive: true });
 
@@ -316,7 +325,7 @@ export async function buildAudio(
   let results: SynthesisResult[];
   try {
     results = await runPool(
-      entries.map(([, spec]) => () => synthesize(spec, cacheDir, ffmpegPath)),
+      entries.map(([, spec]) => () => synthesize(spec, cacheDir, ffmpegPath, existingCacheNames)),
       config.audio.concurrency,
       (result) => {
         completed += 1;
