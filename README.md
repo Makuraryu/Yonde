@@ -70,7 +70,7 @@ Yonde 支持以下环境变量：
 | `YONDE_MODEL` / `DEEPSEEK_MODEL` | 覆盖模型 |
 | `YONDE_TTS_CONCURRENCY` | 覆盖 TTS 并发数 |
 
-也可以用 `translation.api.api_key_env` 指定任意 API Key 环境变量。允许在 TOML 中直接写 `api_key`，但不推荐；Yonde 会提示检查文件权限。API Key 不会写入检查点、日志或音频清单。
+也可以用 `translation.api.api_key_env` 指定任意 API Key 环境变量。若 TOML 中直接设置了 `translation.api.api_key`，它会优先于所有环境变量；未设置时才读取 `api_key_env`、`YONDE_API_KEY` 和兼容变量。Yonde 会提示检查含明文 Key 的文件权限。API Key 不会写入检查点、日志或音频清单。
 
 ## TOML 配置
 

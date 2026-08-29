@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { DEFAULT_CONFIG, loadConfig, translationFingerprint, validateConfig } from "../src/config";
+import { DEFAULT_CONFIG, loadConfig, resolveApiKey, translationFingerprint, validateConfig } from "../src/config";
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => {
@@ -74,5 +74,18 @@ describe("configuration", () => {
     expect(translationFingerprint(left)).toBe(translationFingerprint(right));
     right.translation.targetLanguage = "en";
     expect(translationFingerprint(left)).not.toBe(translationFingerprint(right));
+  });
+
+  test("inline API key takes precedence over environment variables", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.translation.api.apiKey = "inline-key";
+    const previous = process.env.YONDE_API_KEY;
+    try {
+      process.env.YONDE_API_KEY = "environment-key";
+      expect(resolveApiKey(config)).toBe("inline-key");
+    } finally {
+      if (previous === undefined) delete process.env.YONDE_API_KEY;
+      else process.env.YONDE_API_KEY = previous;
+    }
   });
 });

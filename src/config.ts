@@ -284,10 +284,10 @@ export async function loadConfig(explicitPath?: string, cwd = process.cwd()): Pr
 }
 
 export function resolveApiKey(config: AppConfig): string | undefined {
-  return process.env[config.translation.api.apiKeyEnv]
+  return config.translation.api.apiKey
+    ?? process.env[config.translation.api.apiKeyEnv]
     ?? process.env.YONDE_API_KEY
-    ?? process.env.DEEPSEEK_API_KEY
-    ?? config.translation.api.apiKey;
+    ?? process.env.DEEPSEEK_API_KEY;
 }
 
 export function translationFingerprint(config: AppConfig): string {
