@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+jpns.toml
+output/
+.state/
+*.tmp
+*.log
+*.tgz
+*.mp3
+.DS_Store
+
+# Local source material and legacy working files are not part of the CLI package.
+/*.txt
+/kazenouta/
+/tts.js
