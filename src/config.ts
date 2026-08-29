@@ -241,8 +241,7 @@ function environmentOverrides(): UnknownRecord {
   const translation: UnknownRecord = { api };
   const audio: UnknownRecord = {};
   if (process.env.YONDE_API_ENDPOINT) api.endpoint = process.env.YONDE_API_ENDPOINT;
-  else if (process.env.DEEPSEEK_BASE_URL) api.endpoint = `${process.env.DEEPSEEK_BASE_URL.replace(/\/$/, "")}/chat/completions`;
-  if (process.env.YONDE_MODEL ?? process.env.DEEPSEEK_MODEL) api.model = process.env.YONDE_MODEL ?? process.env.DEEPSEEK_MODEL;
+  if (process.env.YONDE_MODEL) api.model = process.env.YONDE_MODEL;
   if (process.env.YONDE_TTS_CONCURRENCY) audio.concurrency = Number(process.env.YONDE_TTS_CONCURRENCY);
   return { translation, audio };
 }
@@ -285,9 +284,7 @@ export async function loadConfig(explicitPath?: string, cwd = process.cwd()): Pr
 
 export function resolveApiKey(config: AppConfig): string | undefined {
   return config.translation.api.apiKey
-    ?? process.env[config.translation.api.apiKeyEnv]
-    ?? process.env.YONDE_API_KEY
-    ?? process.env.DEEPSEEK_API_KEY;
+    ?? process.env[config.translation.api.apiKeyEnv];
 }
 
 export function translationFingerprint(config: AppConfig): string {

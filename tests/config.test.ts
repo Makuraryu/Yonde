@@ -88,4 +88,33 @@ describe("configuration", () => {
       else process.env.YONDE_API_KEY = previous;
     }
   });
+
+  test("does not read undeclared DeepSeek API key variables", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    const previousYonde = process.env.YONDE_API_KEY;
+    const previousDeepSeek = process.env.DEEPSEEK_API_KEY;
+    try {
+      delete process.env.YONDE_API_KEY;
+      process.env.DEEPSEEK_API_KEY = "must-not-be-read";
+      expect(resolveApiKey(config)).toBeUndefined();
+    } finally {
+      if (previousYonde === undefined) delete process.env.YONDE_API_KEY;
+      else process.env.YONDE_API_KEY = previousYonde;
+      if (previousDeepSeek === undefined) delete process.env.DEEPSEEK_API_KEY;
+      else process.env.DEEPSEEK_API_KEY = previousDeepSeek;
+    }
+  });
+
+  test("reads only the environment variable explicitly named by api_key_env", () => {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.translation.api.apiKeyEnv = "YONDE_TEST_KEY";
+    const previous = process.env.YONDE_TEST_KEY;
+    try {
+      process.env.YONDE_TEST_KEY = "explicit-key";
+      expect(resolveApiKey(config)).toBe("explicit-key");
+    } finally {
+      if (previous === undefined) delete process.env.YONDE_TEST_KEY;
+      else process.env.YONDE_TEST_KEY = previous;
+    }
+  });
 });

@@ -11,7 +11,7 @@ type Stage = "translate" | "audio" | "all";
 type RunArgs = { command: "run"; input: string; stage: Stage; outputDir?: string; configPath?: string };
 type CliArgs = RunArgs | { command: "init"; path: string } | { command: "config-check"; configPath?: string } | { command: "help" } | { command: "version" };
 
-const VERSION = "0.3.2";
+const VERSION = "0.3.3";
 
 export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料生成器
 
@@ -50,8 +50,8 @@ export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料
   YONDE_TTS_CONCURRENCY  覆盖 TTS 并发数
 
 API Key 优先级:
-  translation.api.api_key > api_key_env 指向的环境变量
-  > YONDE_API_KEY > DEEPSEEK_API_KEY`;
+  translation.api.api_key > api_key_env 明确指定的环境变量
+  默认 api_key_env 为 YONDE_API_KEY；不会读取其他 Key 变量`;
 
 function usage(exitCode = 1): never {
   const output = exitCode === 0 ? console.log : console.error;
