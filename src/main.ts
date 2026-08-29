@@ -11,7 +11,7 @@ type Stage = "translate" | "audio" | "all";
 type RunArgs = { command: "run"; input: string; stage: Stage; outputDir?: string; configPath?: string };
 type CliArgs = RunArgs | { command: "init"; path: string } | { command: "config-check"; configPath?: string } | { command: "help" } | { command: "version" };
 
-const VERSION = "0.3.3";
+const VERSION = "0.4.0";
 
 export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料生成器
 
@@ -37,11 +37,11 @@ export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料
   > ~/.config/yonde/config.toml > 内置默认值
 
 示例:
-  bunx github:Makuraryu/Yonde input.txt
-  bunx github:Makuraryu/Yonde input.txt --stage translate
-  bunx github:Makuraryu/Yonde input.txt --config ./yonde.toml
-  bunx github:Makuraryu/Yonde config check
-  bunx github:Makuraryu/Yonde init
+  bunx @makuraryu/yonde@latest input.txt
+  bunx @makuraryu/yonde@latest input.txt --stage translate
+  bunx @makuraryu/yonde@latest input.txt --config ./yonde.toml
+  bunx @makuraryu/yonde@latest config check
+  bunx @makuraryu/yonde@latest init
 
 环境变量:
   YONDE_API_KEY          默认翻译 API Key

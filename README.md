@@ -7,15 +7,15 @@ Yonde（読んで）是一个配置驱动的 Bun CLI：把日文文本翻译成�
 需要 [Bun](https://bun.sh/) 1.3 或更新版本。生成 MP3 时还需要 `ffmpeg`；只运行翻译阶段则不需要。
 
 ```bash
-bunx github:Makuraryu/Yonde init
+bunx @makuraryu/yonde@latest init
 
 # 默认配置从这个环境变量读取 DeepSeek API Key
 export YONDE_API_KEY="your-api-key"
 
-bunx github:Makuraryu/Yonde input.txt
+bunx @makuraryu/yonde@latest input.txt
 ```
 
-这会直接从公开 GitHub 仓库的默认分支安装并运行，不需要 npm 发布。版本记录可在 [GitHub Releases](https://github.com/Makuraryu/Yonde/releases) 查看。
+`bunx` 会从 npm 获取最新版并直接运行，无需全局安装。也可以使用 `bunx github:Makuraryu/Yonde` 试用 GitHub 默认分支上的未发布代码。版本记录见 [GitHub Releases](https://github.com/Makuraryu/Yonde/releases)。
 
 ## 命令
 
@@ -29,21 +29,21 @@ yonde config check [--config <配置文件>]
 
 ```bash
 # 翻译并生成音频
-bunx github:Makuraryu/Yonde input.txt
+bunx @makuraryu/yonde@latest input.txt
 
 # 只翻译，或使用已有翻译生成音频
-bunx github:Makuraryu/Yonde input.txt --stage translate
-bunx github:Makuraryu/Yonde input.txt --stage audio
+bunx @makuraryu/yonde@latest input.txt --stage translate
+bunx @makuraryu/yonde@latest input.txt --stage audio
 
 # 指定配置和输出目录
-bunx github:Makuraryu/Yonde input.txt --config ./custom.toml --output-dir ./build
+bunx @makuraryu/yonde@latest input.txt --config ./custom.toml --output-dir ./build
 
 # 检查最终合并后的配置
-bunx github:Makuraryu/Yonde config check
-bunx github:Makuraryu/Yonde config check --config ./custom.toml
+bunx @makuraryu/yonde@latest config check
+bunx @makuraryu/yonde@latest config check --config ./custom.toml
 
 # 查看完整帮助
-bunx github:Makuraryu/Yonde --help
+bunx @makuraryu/yonde@latest --help
 ```
 
 `init` 默认创建 `./yonde.toml`，且不会覆盖已有文件。
@@ -148,6 +148,12 @@ package_asset = "uisfx/sounds/cinematic/select.mp3"
 
 翻译缓存指纹包含输入内容、语言、模型、端点、提示词版本和分句规则，但不包含 API Key。音频缓存指纹包含文本、音色、语言、语速和音调。仅调整朗读顺序时，Yonde 会复用已有语音并重新合并。
 
+翻译、语音生成和最终 MP3 合并都会显示单行进度条，包括完成比例、数量、耗时和 ETA。非交互终端按 5% 里程碑输出，避免日志刷屏。
+
+所有语音和分隔音效会统一为 24 kHz、单声道、96 kbps，最终 MP3 采用无损快速拼接，不再把数小时音频完整重编码。
+
+最终合并使用状态文件保护原子写入。若进程在 ffmpeg 已完成后、最终重命名前退出，下次运行会直接恢复成品；若在合并中途退出，只会重做最终合并，已经生成的翻译和 TTS 缓存不会丢失。
+
 ## 本地开发
 
 ```bash
@@ -159,7 +165,7 @@ bun run check
 bun run src/main.ts --help
 ```
 
-## npm 发布（可选）
+## npm 发布
 
 ```bash
 bun run check
@@ -168,7 +174,7 @@ npm pack --dry-run
 npm publish --access public
 ```
 
-Yonde 不依赖 npm 发布即可通过上面的 `github:Makuraryu/Yonde` 包标识运行。npm 发布只是提供更短的 registry 包名。
+发布后可通过 `bunx @makuraryu/yonde@latest` 直接运行；GitHub 包标识适合测试尚未发布的默认分支。
 
 ## License
 

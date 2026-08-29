@@ -3,6 +3,7 @@ import { resolveApiKey } from "./config";
 import type { GlossaryEntry, TranslationState } from "./state";
 import { writeJson } from "./state";
 import type { Paragraph, TranslatedParagraph } from "./text";
+import { ProgressBar } from "./progress";
 
 type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: string } }>;
@@ -145,31 +146,37 @@ async function translateOne(
 export async function translateAll(state: TranslationState, statePath: string, config: AppConfig): Promise<TranslationState> {
   const apiKey = resolveApiKey(config);
   if (!apiKey) throw new Error(`缺少 API Key；请设置环境变量 ${config.translation.api.apiKeyEnv}，或在 translation.api.api_key 中配置`);
+  const progress = new ProgressBar("翻译", state.paragraphs.length, state.translated.length);
 
-  for (let index = state.translated.length; index < state.paragraphs.length; index += 1) {
-    const paragraph = state.paragraphs[index];
-    process.stdout.write(`[翻译 ${index + 1}/${state.paragraphs.length}] ${paragraph.original.slice(0, 28)}… `);
-    let result: ModelTranslation | undefined;
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= 4; attempt += 1) {
-      try {
-        result = await translateOne(paragraph, state.translated, state.glossary, apiKey, config);
-        break;
-      } catch (error) {
-        lastError = error;
-        if (attempt < 4) {
-          process.stdout.write(`重试 ${attempt}/3… `);
-          await Bun.sleep(1000 * 2 ** (attempt - 1));
+  try {
+    for (let index = state.translated.length; index < state.paragraphs.length; index += 1) {
+      const paragraph = state.paragraphs[index];
+      let result: ModelTranslation | undefined;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        try {
+          result = await translateOne(paragraph, state.translated, state.glossary, apiKey, config);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 4) {
+            progress.update(index, `第 ${index + 1} 段 · 重试 ${attempt}/3`, true);
+            await Bun.sleep(1000 * 2 ** (attempt - 1));
+          }
         }
       }
+      if (!result) throw lastError;
+      state.translated.push({ ...paragraph, translations: result.translations.map((item) => item.trim()) });
+      state.glossary = mergeGlossary(state.glossary, result.glossaryUpdates ?? []);
+      state.complete = state.translated.length === state.paragraphs.length;
+      state.updatedAt = new Date().toISOString();
+      await writeJson(statePath, state);
+      if (!state.complete) progress.update(state.translated.length, `术语 ${state.glossary.length}`);
     }
-    if (!result) throw lastError;
-    state.translated.push({ ...paragraph, translations: result.translations.map((item) => item.trim()) });
-    state.glossary = mergeGlossary(state.glossary, result.glossaryUpdates ?? []);
-    state.complete = state.translated.length === state.paragraphs.length;
-    state.updatedAt = new Date().toISOString();
-    await writeJson(statePath, state);
-    console.log("完成");
+    progress.finish(state.translated.length ? `术语 ${state.glossary.length}` : "无段落");
+    return state;
+  } catch (error) {
+    progress.fail(`停在 ${state.translated.length}/${state.paragraphs.length}`);
+    throw error;
   }
-  return state;
 }

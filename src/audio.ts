@@ -1,16 +1,34 @@
 import { EdgeTTS } from "node-edge-tts";
-import { copyFile, lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppConfig, VoiceProfile } from "./config";
 import type { TranslatedParagraph } from "./text";
 import { splitForTts } from "./text";
-import { atomicWrite, writeJson } from "./state";
+import { ProgressBar } from "./progress";
+import { atomicWrite, readJson, writeJson } from "./state";
 
 type AudioItem = { kind: string; text?: string; path: string };
 type AudioSpec = { kind: string; text: string; profile: VoiceProfile };
 type PlannedItem = { type: "audio"; spec: AudioSpec } | { type: "separator" };
+type SynthesisResult = { path: string; cached: boolean };
+type AudioManifest = {
+  version: 3;
+  mergeFingerprint: string;
+  profiles: AppConfig["audio"]["profiles"];
+  paragraphSequence: string[];
+  sentenceSequence: string[];
+  separator: AppConfig["audio"]["separator"];
+  items: AudioItem[];
+};
+type MergeState = {
+  version: 1;
+  fingerprint: string;
+  temporary: string;
+  status: "merging" | "complete";
+  expectedSeconds: number;
+};
 
 async function fileIsUsable(path: string): Promise<boolean> {
   try {
@@ -29,11 +47,11 @@ function specHash(spec: AudioSpec): string {
     .slice(0, 24);
 }
 
-async function synthesize(spec: AudioSpec, cacheDir: string, ffmpegPath: string): Promise<string> {
+async function synthesize(spec: AudioSpec, cacheDir: string, ffmpegPath: string): Promise<SynthesisResult> {
   const hash = specHash(spec);
   const safeId = spec.kind.replace(/[^a-zA-Z0-9_-]/g, "_");
   const output = join(cacheDir, `${safeId}-${hash}.mp3`);
-  if (await fileIsUsable(output)) return output;
+  if (await fileIsUsable(output)) return { path: output, cached: true };
 
   const temporary = `${output}.${process.pid}.${randomUUID()}.part.mp3`;
   if (!/[\p{L}\p{N}]/u.test(spec.text)) {
@@ -43,7 +61,7 @@ async function synthesize(spec: AudioSpec, cacheDir: string, ffmpegPath: string)
     ]);
     if (await silence.exited !== 0) throw new Error(`无法为纯标点片段生成静音: ${spec.text}`);
     await rename(temporary, output);
-    return output;
+    return { path: output, cached: false };
   }
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     try {
@@ -60,7 +78,7 @@ async function synthesize(spec: AudioSpec, cacheDir: string, ffmpegPath: string)
       await tts.ttsPromise(spec.text, temporary);
       if (!(await fileIsUsable(temporary))) throw new Error("TTS 输出为空");
       await rename(temporary, output);
-      return output;
+      return { path: output, cached: false };
     } catch (error) {
       await rm(temporary, { force: true });
       if (attempt === 6) throw new Error(`${spec.kind} 生成失败（${spec.text.slice(0, 40)}）: ${error instanceof Error ? error.message : String(error)}`);
@@ -70,21 +88,18 @@ async function synthesize(spec: AudioSpec, cacheDir: string, ffmpegPath: string)
   throw new Error("无法生成语音");
 }
 
-async function runPool<T>(jobs: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
+async function runPool<T>(jobs: Array<() => Promise<T>>, concurrency: number, onCompleted: (value: T) => void): Promise<T[]> {
   const results = new Array<T>(jobs.length);
   let next = 0;
-  let completed = 0;
   async function worker() {
     while (true) {
       const index = next++;
       if (index >= jobs.length) return;
       results[index] = await jobs[index]();
-      completed += 1;
-      process.stdout.write(`\r[TTS] ${completed}/${jobs.length}`);
+      onCompleted(results[index]);
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
-  if (jobs.length) process.stdout.write("\n");
   return results;
 }
 
@@ -92,24 +107,123 @@ function escapeConcatPath(path: string): string {
   return path.replace(/'/g, "'\\''");
 }
 
-async function runFfmpeg(items: AudioItem[], outputPath: string, stateDir: string, ffmpegPath: string): Promise<void> {
+export function audioMergeFingerprint(value: Omit<AudioManifest, "version" | "mergeFingerprint">): string {
+  return new Bun.CryptoHasher("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export function mergeStateCanRecover(value: unknown, fingerprint: string, outputPath: string): value is MergeState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Partial<MergeState>;
+  const prefix = `${basename(outputPath)}.`;
+  return state.version === 1
+    && state.status === "complete"
+    && state.fingerprint === fingerprint
+    && typeof state.temporary === "string"
+    && dirname(state.temporary) === dirname(outputPath)
+    && basename(state.temporary).startsWith(prefix)
+    && basename(state.temporary).endsWith(".tmp.mp3");
+}
+
+async function temporaryOutputs(outputPath: string): Promise<string[]> {
+  const prefix = `${basename(outputPath)}.`;
+  return (await readdir(dirname(outputPath)))
+    .filter((entry) => entry.startsWith(prefix) && entry.endsWith(".tmp.mp3"))
+    .map((entry) => join(dirname(outputPath), entry));
+}
+
+async function estimateDurationSeconds(items: AudioItem[]): Promise<number> {
+  const sizes = new Map<string, number>();
+  let bytes = 0;
+  for (const item of items) {
+    let size = sizes.get(item.path);
+    if (size === undefined) {
+      size = (await lstat(item.path)).size;
+      sizes.set(item.path, size);
+    }
+    bytes += size;
+  }
+  return Math.max(1, bytes * 8 / 96_000);
+}
+
+async function recoverCompletedMerge(outputPath: string, stateDir: string, fingerprint: string): Promise<boolean> {
+  const statePath = join(stateDir, "audio-merge-state.json");
+  const state = await readJson<unknown>(statePath);
+  if (!mergeStateCanRecover(state, fingerprint, outputPath) || !(await fileIsUsable(state.temporary))) return false;
+  await rename(state.temporary, outputPath);
+  await rm(statePath, { force: true });
+  for (const stale of await temporaryOutputs(outputPath)) await rm(stale, { force: true });
+  const progress = new ProgressBar("恢复", 1);
+  progress.finish("已恢复完成的合并结果");
+  return true;
+}
+
+async function readFfmpegProgress(stream: ReadableStream<Uint8Array>, progress: ProgressBar, totalSeconds: number): Promise<void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    pending += decoder.decode(value, { stream: true });
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("out_time_us=")) continue;
+      const seconds = Number(line.slice("out_time_us=".length)) / 1_000_000;
+      if (Number.isFinite(seconds)) progress.update(Math.min(seconds, totalSeconds), `音频 ${Math.floor(seconds / 60)} 分钟`);
+    }
+  }
+}
+
+async function runFfmpeg(
+  items: AudioItem[],
+  outputPath: string,
+  stateDir: string,
+  ffmpegPath: string,
+  fingerprint: string,
+): Promise<void> {
   const listPath = join(stateDir, "concat.txt");
   const paths = items.map((item) => relative(stateDir, item.path));
   if (paths.some((path) => path.startsWith("..") || /[\r\n\0]/.test(path))) throw new Error("音频缓存路径超出状态目录或含控制字符");
   await atomicWrite(listPath, paths.map((path) => `file '${escapeConcatPath(path)}'`).join("\n") + "\n");
   const temporary = `${outputPath}.${process.pid}.${randomUUID()}.tmp.mp3`;
+  const mergeStatePath = join(stateDir, "audio-merge-state.json");
+  const expectedSeconds = await estimateDurationSeconds(items);
+  const progress = new ProgressBar("合并", expectedSeconds);
   await rm(temporary, { force: true });
+  await writeJson(mergeStatePath, {
+    version: 1,
+    fingerprint,
+    temporary,
+    status: "merging",
+    expectedSeconds,
+  } satisfies MergeState);
   const processResult = Bun.spawn([
     ffmpegPath, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "1", "-i", listPath,
-    "-af", "aresample=24000,aformat=sample_fmts=s16:channel_layouts=mono",
-    "-c:a", "libmp3lame", "-b:a", "96k", temporary,
-  ], { stdout: "inherit", stderr: "inherit" });
+    "-c:a", "copy", "-progress", "pipe:1", "-nostats", temporary,
+  ], { stdout: "pipe", stderr: "pipe" });
+  const progressReader = readFfmpegProgress(processResult.stdout, progress, expectedSeconds);
+  const stderrReader = new Response(processResult.stderr).text();
   const exitCode = await processResult.exited;
+  await progressReader;
+  const stderr = await stderrReader;
   if (exitCode !== 0) {
+    progress.fail(`退出码 ${exitCode}`);
     await rm(temporary, { force: true });
-    throw new Error(`ffmpeg 合并失败，退出码 ${exitCode}`);
+    await rm(mergeStatePath, { force: true });
+    const detail = stderr.trim().split("\n").at(-1);
+    throw new Error(`ffmpeg 合并失败，退出码 ${exitCode}${detail ? `: ${detail}` : ""}`);
   }
+  await writeJson(mergeStatePath, {
+    version: 1,
+    fingerprint,
+    temporary,
+    status: "complete",
+    expectedSeconds,
+  } satisfies MergeState);
+  progress.finish(`${items.length} 个片段`);
   await rename(temporary, outputPath);
+  await rm(mergeStatePath, { force: true });
 }
 
 function profileText(profile: VoiceProfile, source: string, target: string): string {
@@ -162,10 +276,6 @@ export async function buildAudio(
   for (const entry of await readdir(cacheDir)) if (entry.endsWith(".part.mp3")) await rm(join(cacheDir, entry), { force: true });
   const outputDir = dirname(outputPath);
   await mkdir(outputDir, { recursive: true });
-  const stalePrefix = `${basename(outputPath)}.`;
-  for (const entry of await readdir(outputDir)) {
-    if (entry.startsWith(stalePrefix) && entry.endsWith(".tmp.mp3")) await rm(join(outputDir, entry), { force: true });
-  }
 
   const plan = buildPlan(paragraphs, config);
   const uniqueSpecs = new Map<string, AudioSpec>();
@@ -174,13 +284,23 @@ export async function buildAudio(
 
   let separatorPath: string | undefined;
   if (plan.some((item) => item.type === "separator")) {
-    separatorPath = join(stateDir, "separator.mp3");
+    separatorPath = join(stateDir, "separator-24khz-96k-mono.mp3");
     if (!(await fileIsUsable(separatorPath))) {
       const source = resolveSeparatorAsset(config.audio.separator.packageAsset);
       if (!(await fileIsUsable(source))) throw new Error(`找不到可用的分隔音效: ${source}`);
-      const temporarySeparator = `${separatorPath}.${randomUUID()}.tmp`;
+      const temporarySeparator = `${separatorPath}.${randomUUID()}.tmp.mp3`;
       try {
-        await copyFile(source, temporarySeparator);
+        const conversion = Bun.spawn([
+          ffmpegPath, "-hide_banner", "-loglevel", "error", "-y", "-i", source,
+          "-ar", "24000", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "96k", temporarySeparator,
+        ], { stdout: "ignore", stderr: "pipe" });
+        const stderrReader = new Response(conversion.stderr).text();
+        const exitCode = await conversion.exited;
+        const stderr = await stderrReader;
+        if (exitCode !== 0 || !(await fileIsUsable(temporarySeparator))) {
+          const detail = stderr.trim().split("\n").at(-1);
+          throw new Error(`分隔音效标准化失败${detail ? `: ${detail}` : ""}`);
+        }
         await rename(temporarySeparator, separatorPath);
       } catch (error) {
         await rm(temporarySeparator, { force: true });
@@ -190,21 +310,43 @@ export async function buildAudio(
   }
 
   const entries = [...uniqueSpecs.entries()];
-  console.log(`[TTS] ${entries.length} 个唯一片段，并发 ${config.audio.concurrency}（已有缓存会跳过）`);
-  const paths = await runPool(entries.map(([, spec]) => () => synthesize(spec, cacheDir, ffmpegPath)), config.audio.concurrency);
-  const generated = new Map(entries.map(([hash], index) => [hash, paths[index]]));
+  const synthesisProgress = new ProgressBar("语音", entries.length);
+  let completed = 0;
+  let cached = 0;
+  let results: SynthesisResult[];
+  try {
+    results = await runPool(
+      entries.map(([, spec]) => () => synthesize(spec, cacheDir, ffmpegPath)),
+      config.audio.concurrency,
+      (result) => {
+        completed += 1;
+        if (result.cached) cached += 1;
+        if (completed < entries.length) synthesisProgress.update(completed, `缓存 ${cached} · 新生成 ${completed - cached}`);
+      },
+    );
+    synthesisProgress.finish(`缓存 ${cached} · 新生成 ${completed - cached}`);
+  } catch (error) {
+    synthesisProgress.fail(`完成 ${completed}/${entries.length}`);
+    throw error;
+  }
+  const generated = new Map(entries.map(([hash], index) => [hash, results[index].path]));
   const items: AudioItem[] = plan.map((item) => item.type === "separator"
     ? { kind: "separator", path: separatorPath! }
     : { kind: item.spec.kind, text: item.spec.text, path: generated.get(specHash(item.spec))! });
 
-  await writeJson(join(stateDir, "audio-manifest.json"), {
-    version: 2,
+  const manifestBody = {
     profiles: config.audio.profiles,
     paragraphSequence: config.audio.paragraphSequence,
     sentenceSequence: config.audio.sentenceSequence,
     separator: config.audio.separator,
     items,
-  });
-  console.log(`[合并] ${items.length} 个音频片段`);
-  await runFfmpeg(items, outputPath, stateDir, ffmpegPath);
+  };
+  const mergeFingerprint = audioMergeFingerprint(manifestBody);
+  if (await recoverCompletedMerge(outputPath, stateDir, mergeFingerprint)) return;
+  const stale = await temporaryOutputs(outputPath);
+  if (stale.length) console.warn(`发现 ${stale.length} 个未完成的合并临时文件，将保留语音缓存并重新合并。`);
+  for (const path of stale) await rm(path, { force: true });
+  const manifest: AudioManifest = { version: 3, mergeFingerprint, ...manifestBody };
+  await writeJson(join(stateDir, "audio-manifest.json"), manifest);
+  await runFfmpeg(items, outputPath, stateDir, ffmpegPath, mergeFingerprint);
 }

@@ -1,6 +1,6 @@
 {
   "name": "@makuraryu/yonde",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Config-driven Bun CLI for creating bilingual Japanese listening scripts and MP3 audio",
   "type": "module",
   "bin": {
