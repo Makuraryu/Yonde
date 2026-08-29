@@ -11,7 +11,7 @@ type Stage = "translate" | "audio" | "all";
 type RunArgs = { command: "run"; input: string; stage: Stage; outputDir?: string; configPath?: string };
 type CliArgs = RunArgs | { command: "init"; path: string } | { command: "config-check"; configPath?: string } | { command: "help" } | { command: "version" };
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料生成器
 
@@ -22,7 +22,7 @@ export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料
 
 命令:
   <输入.txt>       翻译文本并生成双语听力稿与 MP3
-  init             创建配置模板（默认: ./jpns.toml，不覆盖已有文件）
+  init             创建配置模板（默认: ./yonde.toml，不覆盖已有文件）
   config check     发现、合并并校验配置，但不生成内容
 
 选项:
@@ -33,21 +33,21 @@ export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料
   -v, --version        显示版本
 
 配置优先级（高 → 低）:
-  CLI 选项 > 环境变量 > --config 文件 > ./jpns.toml
-  > ~/.config/jpns/config.toml > 内置默认值
+  CLI 选项 > 环境变量 > --config 文件 > ./yonde.toml
+  > ~/.config/yonde/config.toml > 内置默认值
 
 示例:
   bunx github:Makuraryu/Yonde input.txt
   bunx github:Makuraryu/Yonde input.txt --stage translate
-  bunx github:Makuraryu/Yonde input.txt --config ./jpns.toml
+  bunx github:Makuraryu/Yonde input.txt --config ./yonde.toml
   bunx github:Makuraryu/Yonde config check
   bunx github:Makuraryu/Yonde init
 
 环境变量:
-  JPNS_DEEPSEEK_API_KEY  默认翻译 API Key
-  JPNS_API_ENDPOINT     覆盖翻译 API 地址
-  JPNS_MODEL            覆盖翻译模型
-  TTS_CONCURRENCY       覆盖 TTS 并发数`;
+  YONDE_API_KEY          默认翻译 API Key
+  YONDE_API_ENDPOINT     覆盖翻译 API 地址
+  YONDE_MODEL            覆盖翻译模型
+  YONDE_TTS_CONCURRENCY  覆盖 TTS 并发数`;
 
 function usage(exitCode = 1): never {
   const output = exitCode === 0 ? console.log : console.error;
@@ -66,7 +66,7 @@ export function parseArgs(args: string[]): CliArgs {
   if (args.includes("--version") || args.includes("-v")) return { command: "version" };
   if (args[0] === "init") {
     if (args.length > 2 || args[1]?.startsWith("--")) usage();
-    return { command: "init", path: args[1] ?? "jpns.toml" };
+    return { command: "init", path: args[1] ?? "yonde.toml" };
   }
   if (args[0] === "config") {
     if (args[1] !== "check") usage();

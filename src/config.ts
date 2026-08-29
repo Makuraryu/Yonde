@@ -48,7 +48,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     api: {
       endpoint: "https://api.deepseek.com/chat/completions",
       model: "deepseek-chat",
-      apiKeyEnv: "JPNS_DEEPSEEK_API_KEY",
+      apiKeyEnv: "YONDE_API_KEY",
       timeoutMs: 120_000,
     },
   },
@@ -80,7 +80,7 @@ temperature = 0.2
 [translation.api]
 endpoint = "https://api.deepseek.com/chat/completions"
 model = "deepseek-chat"
-api_key_env = "JPNS_DEEPSEEK_API_KEY"
+api_key_env = "YONDE_API_KEY"
 # api_key = "不推荐：优先使用上面的环境变量"
 timeout_ms = 120000
 
@@ -240,10 +240,10 @@ function environmentOverrides(): UnknownRecord {
   const api: UnknownRecord = {};
   const translation: UnknownRecord = { api };
   const audio: UnknownRecord = {};
-  if (process.env.JPNS_API_ENDPOINT) api.endpoint = process.env.JPNS_API_ENDPOINT;
+  if (process.env.YONDE_API_ENDPOINT) api.endpoint = process.env.YONDE_API_ENDPOINT;
   else if (process.env.DEEPSEEK_BASE_URL) api.endpoint = `${process.env.DEEPSEEK_BASE_URL.replace(/\/$/, "")}/chat/completions`;
-  if (process.env.JPNS_MODEL ?? process.env.DEEPSEEK_MODEL) api.model = process.env.JPNS_MODEL ?? process.env.DEEPSEEK_MODEL;
-  if (process.env.TTS_CONCURRENCY) audio.concurrency = Number(process.env.TTS_CONCURRENCY);
+  if (process.env.YONDE_MODEL ?? process.env.DEEPSEEK_MODEL) api.model = process.env.YONDE_MODEL ?? process.env.DEEPSEEK_MODEL;
+  if (process.env.YONDE_TTS_CONCURRENCY) audio.concurrency = Number(process.env.YONDE_TTS_CONCURRENCY);
   return { translation, audio };
 }
 
@@ -252,8 +252,8 @@ async function existing(path: string): Promise<boolean> {
 }
 
 export async function loadConfig(explicitPath?: string, cwd = process.cwd()): Promise<{ config: AppConfig; path?: string; warnings: string[] }> {
-  const userPath = join(homedir(), ".config", "jpns", "config.toml");
-  const projectPath = join(cwd, "jpns.toml");
+  const userPath = join(homedir(), ".config", "yonde", "config.toml");
+  const projectPath = join(cwd, "yonde.toml");
   let combined: unknown = DEFAULT_CONFIG;
   let loadedPath: string | undefined;
 
@@ -285,7 +285,7 @@ export async function loadConfig(explicitPath?: string, cwd = process.cwd()): Pr
 
 export function resolveApiKey(config: AppConfig): string | undefined {
   return process.env[config.translation.api.apiKeyEnv]
-    ?? process.env.JPNS_DEEPSEEK_API_KEY
+    ?? process.env.YONDE_API_KEY
     ?? process.env.DEEPSEEK_API_KEY
     ?? config.translation.api.apiKey;
 }

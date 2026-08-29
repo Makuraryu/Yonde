@@ -11,7 +11,7 @@ afterEach(async () => {
 
 describe("configuration", () => {
   test("loads TOML overrides on top of defaults", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "jpns-config-"));
+    const directory = await mkdtemp(join(tmpdir(), "yonde-config-"));
     temporaryDirectories.push(directory);
     const path = join(directory, "custom.toml");
     await Bun.write(path, `version = 1\n[translation]\nsource_language = "en"\ntarget_language = "fr"\n[audio]\nsentence_sequence = ["target_normal"]\n`);
@@ -25,16 +25,16 @@ describe("configuration", () => {
   test("discovers project-local configuration", async () => {
     const directory = await mkdtemp(join(tmpdir(), "yonde-project-"));
     temporaryDirectories.push(directory);
-    await Bun.write(join(directory, "jpns.toml"), `version = 1\n[translation]\ntarget_language = "en"\n`);
+    await Bun.write(join(directory, "yonde.toml"), `version = 1\n[translation]\ntarget_language = "en"\n`);
     const { config, path } = await loadConfig(undefined, directory);
     expect(config.translation.targetLanguage).toBe("en");
-    expect(path).toBe(join(directory, "jpns.toml"));
+    expect(path).toBe(join(directory, "yonde.toml"));
   });
 
   test("explicit config overrides project config", async () => {
     const directory = await mkdtemp(join(tmpdir(), "yonde-priority-"));
     temporaryDirectories.push(directory);
-    await Bun.write(join(directory, "jpns.toml"), `version = 1\n[translation]\ntarget_language = "en"\n`);
+    await Bun.write(join(directory, "yonde.toml"), `version = 1\n[translation]\ntarget_language = "en"\n`);
     await Bun.write(join(directory, "custom.toml"), `version = 1\n[translation]\ntarget_language = "ko"\n`);
     const { config, path } = await loadConfig("custom.toml", directory);
     expect(config.translation.targetLanguage).toBe("ko");

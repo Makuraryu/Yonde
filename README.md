@@ -10,7 +10,7 @@ Yonde（読んで）是一个配置驱动的 Bun CLI：把日文文本翻译成�
 bunx github:Makuraryu/Yonde init
 
 # 默认配置从这个环境变量读取 DeepSeek API Key
-export JPNS_DEEPSEEK_API_KEY="your-api-key"
+export YONDE_API_KEY="your-api-key"
 
 bunx github:Makuraryu/Yonde input.txt
 ```
@@ -46,7 +46,7 @@ bunx github:Makuraryu/Yonde config check --config ./custom.toml
 bunx github:Makuraryu/Yonde --help
 ```
 
-`init` 默认创建 `./jpns.toml`，且不会覆盖已有文件。
+`init` 默认创建 `./yonde.toml`，且不会覆盖已有文件。
 
 ## 配置发现与优先级
 
@@ -55,20 +55,20 @@ bunx github:Makuraryu/Yonde --help
 1. CLI 参数，例如 `--config`、`--output-dir`、`--stage`
 2. 环境变量
 3. `--config` 指定的 TOML
-4. 当前目录的 `jpns.toml`
-5. `~/.config/jpns/config.toml`
+4. 当前目录的 `yonde.toml`
+5. `~/.config/yonde/config.toml`
 6. 内置默认值
 
 Yonde 支持以下环境变量：
 
 | 变量 | 用途 |
 | --- | --- |
-| `JPNS_DEEPSEEK_API_KEY` | 默认翻译 API Key |
+| `YONDE_API_KEY` | 默认翻译 API Key |
 | `DEEPSEEK_API_KEY` | API Key 兼容变量 |
-| `JPNS_API_ENDPOINT` | 覆盖翻译 API 地址 |
+| `YONDE_API_ENDPOINT` | 覆盖翻译 API 地址 |
 | `DEEPSEEK_BASE_URL` | API 基础地址兼容变量 |
-| `JPNS_MODEL` / `DEEPSEEK_MODEL` | 覆盖模型 |
-| `TTS_CONCURRENCY` | 覆盖 TTS 并发数 |
+| `YONDE_MODEL` / `DEEPSEEK_MODEL` | 覆盖模型 |
+| `YONDE_TTS_CONCURRENCY` | 覆盖 TTS 并发数 |
 
 也可以用 `translation.api.api_key_env` 指定任意 API Key 环境变量。允许在 TOML 中直接写 `api_key`，但不推荐；Yonde 会提示检查文件权限。API Key 不会写入检查点、日志或音频清单。
 
@@ -89,7 +89,7 @@ temperature = 0.2
 [translation.api]
 endpoint = "https://api.deepseek.com/chat/completions"
 model = "deepseek-chat"
-api_key_env = "JPNS_DEEPSEEK_API_KEY"
+api_key_env = "YONDE_API_KEY"
 timeout_ms = 120000
 
 [text]

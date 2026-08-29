@@ -13,6 +13,7 @@ describe("CLI arguments", () => {
   });
 
   test("supports init and config check commands", () => {
+    expect(parseArgs(["init"])).toEqual({ command: "init", path: "yonde.toml" });
     expect(parseArgs(["init", "custom.toml"])).toEqual({ command: "init", path: "custom.toml" });
     expect(parseArgs(["config", "check", "--config", "custom.toml"])).toEqual({ command: "config-check", configPath: "custom.toml" });
   });
