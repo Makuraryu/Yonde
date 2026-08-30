@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { audioMergeFingerprint, buildPlan, mergeStateCanRecover } from "../src/audio";
+import { audioMergeFingerprint, buildPlan, mergeStateCanRecover, profileForText } from "../src/audio";
 import { DEFAULT_CONFIG } from "../src/config";
 
 describe("audio planning", () => {
@@ -28,6 +28,15 @@ describe("audio planning", () => {
     config.audio.sentenceSequence = ["source_slow", "source_slow"];
     const plan = buildPlan([{ index: 0, original: "猫。", sentences: ["猫。"], translations: ["猫。"] }], config);
     expect(plan).toHaveLength(2);
+  });
+
+  test("uses a Japanese voice for kana-only text unsupported by a target voice", () => {
+    const target = DEFAULT_CONFIG.audio.profiles.target_normal;
+    const selected = profileForText(target, "ひたぎ，", DEFAULT_CONFIG.audio.profiles);
+    expect(selected.language).toBe("ja-JP");
+    expect(selected.voice).toBe(DEFAULT_CONFIG.audio.profiles.source_full.voice);
+    expect(selected.rate).toBe(target.rate);
+    expect(profileForText(target, "战场原同学，", DEFAULT_CONFIG.audio.profiles)).toBe(target);
   });
 
   test("fingerprints merge order and only recovers completed matching output", () => {

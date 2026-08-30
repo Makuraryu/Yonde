@@ -11,7 +11,7 @@ type Stage = "translate" | "audio" | "all";
 type RunArgs = { command: "run"; input: string; stage: Stage; outputDir?: string; configPath?: string };
 type CliArgs = RunArgs | { command: "init"; path: string } | { command: "config-check"; configPath?: string } | { command: "help" } | { command: "version" };
 
-const VERSION = "0.4.3";
+const VERSION = "0.4.4";
 
 export const HELP_TEXT = `Yonde ${VERSION} — 配置驱动的双语听力材料生成器
 

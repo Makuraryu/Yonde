@@ -264,12 +264,23 @@ function profileText(profile: VoiceProfile, source: string, target: string): str
   return profile.text === "target" ? target : source;
 }
 
+export function profileForText(
+  profile: VoiceProfile,
+  text: string,
+  profiles: Record<string, VoiceProfile>,
+): VoiceProfile {
+  const kanaOnly = /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text) && !/\p{Script=Han}/u.test(text);
+  if (!kanaOnly || profile.language.toLowerCase().startsWith("ja")) return profile;
+  const japanese = Object.values(profiles).find((candidate) => candidate.language.toLowerCase().startsWith("ja"));
+  return japanese ? { ...profile, voice: japanese.voice, language: japanese.language } : profile;
+}
+
 function addProfile(plan: PlannedItem[], id: string, source: string, target: string, config: AppConfig): void {
   if (!Object.hasOwn(config.audio.profiles, id)) throw new Error(`未知音频 profile: ${id}`);
   const profile = config.audio.profiles[id];
   const text = profileText(profile, source, target);
   for (const chunk of splitForTts(text, config.audio.maxChunkChars, config.text.sentenceEndings)) {
-    plan.push({ type: "audio", spec: { kind: id, text: chunk, profile } });
+    plan.push({ type: "audio", spec: { kind: id, text: chunk, profile: profileForText(profile, chunk, config.audio.profiles) } });
   }
 }
 
