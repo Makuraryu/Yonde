@@ -15,6 +15,17 @@ type ModelTranslation = {
   glossaryUpdates?: GlossaryEntry[];
 };
 
+class TranslationCountError extends Error {
+  constructor(readonly result: ModelTranslation, expected: number) {
+    super(`译文数量不符：期望 ${expected}，得到 ${Array.isArray(result.translations) ? result.translations.length : 0}`);
+  }
+}
+
+export function coalesceSingletonTranslations(value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length < 2 || value.some((item) => typeof item !== "string" || !item.trim())) return undefined;
+  return value.map((item) => item.trim()).join("");
+}
+
 function systemPrompt(config: AppConfig): string {
   return `你是文学翻译者。任务是把 ${config.translation.sourceLanguage} 文学片段翻译成自然、准确、适合听力学习的 ${config.translation.targetLanguage}。
 必须保持叙述人称、人物称谓、专有名词和文体与已有上下文一致。不要解释，不要合并或拆分输入片段。
@@ -47,6 +58,7 @@ async function translateBatch(
   glossary: GlossaryEntry[],
   apiKey: string,
   config: AppConfig,
+  validationFeedback?: string,
 ): Promise<ModelTranslation> {
   const context = translated.slice(-config.translation.contextParagraphs).map((item) => ({
     original: item.original,
@@ -67,6 +79,8 @@ async function translateBatch(
           establishedGlossary: glossary,
           paragraph: paragraph.original,
           earlierInThisParagraph: earlierInParagraph,
+          requiredTranslationCount: sentences.length,
+          validationFeedback,
           sentences: sentences.map((text, index) => ({ index: sentenceOffset + index, text })),
         }),
       },
@@ -87,7 +101,7 @@ async function translateBatch(
   if (!content) throw new Error("翻译 API 返回了空响应");
   const parsed = parseModelJson(content);
   if (!Array.isArray(parsed.translations) || parsed.translations.length !== sentences.length) {
-    throw new Error(`译文数量不符：期望 ${sentences.length}，得到 ${parsed.translations?.length ?? 0}`);
+    throw new TranslationCountError(parsed, sentences.length);
   }
   if (parsed.translations.some((item) => typeof item !== "string" || !item.trim())) throw new Error("译文包含空项");
   return parsed;
@@ -106,6 +120,8 @@ async function translateOne(
   async function alignedBatch(offset: number, sentences: string[]): Promise<ModelTranslation> {
     let result: ModelTranslation | undefined;
     let lastError: unknown;
+    let repairableResult: ModelTranslation | undefined;
+    let validationFeedback: string | undefined;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
         result = await translateBatch(
@@ -117,15 +133,27 @@ async function translateOne(
           glossary,
           apiKey,
           config,
+          validationFeedback,
         );
         break;
       } catch (error) {
         lastError = error;
+        if (error instanceof TranslationCountError) {
+          validationFeedback = `${error.message}。请重新输出，translations 必须严格只有 ${sentences.length} 项；不要把同一个句子拆成多项，也不要另行翻译整个 paragraph。`;
+          if (sentences.length === 1 && coalesceSingletonTranslations(error.result.translations)) repairableResult = error.result;
+        }
         if (attempt < 2) await Bun.sleep(750);
       }
     }
     if (result) return result;
-    if (sentences.length === 1) throw lastError;
+    if (sentences.length === 1) {
+      const repaired = coalesceSingletonTranslations(repairableResult?.translations);
+      if (repaired) return {
+        translations: [repaired],
+        glossaryUpdates: Array.isArray(repairableResult?.glossaryUpdates) ? repairableResult.glossaryUpdates : [],
+      };
+      throw lastError;
+    }
 
     const middle = Math.ceil(sentences.length / 2);
     const left = await alignedBatch(offset, sentences.slice(0, middle));
