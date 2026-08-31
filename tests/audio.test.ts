@@ -46,13 +46,14 @@ describe("audio planning", () => {
       sentenceSequence: DEFAULT_CONFIG.audio.sentenceSequence,
       separator: DEFAULT_CONFIG.audio.separator,
       items: [
-        { kind: "source_full", text: "猫。", path: "/tmp/cat.mp3" },
-        { kind: "source_slow", text: "犬。", path: "/tmp/dog.mp3" },
+        { kind: "source_full", text: "猫。", path: "/tmp/cat.mp3", startMs: 0, endMs: 1000, durationMs: 1000 },
+        { kind: "source_slow", text: "犬。", path: "/tmp/dog.mp3", startMs: 1000, endMs: 2200, durationMs: 1200 },
       ],
     };
     const fingerprint = audioMergeFingerprint(body);
     expect(audioMergeFingerprint({ ...body, items: [...body.items].reverse() })).not.toBe(fingerprint);
     expect(audioMergeFingerprint({ ...body, items: [...body.items, { ...body.items[0], text: "鳥。" }] })).not.toBe(fingerprint);
+    expect(audioMergeFingerprint({ ...body, items: body.items.map((item, index) => index === 1 ? { ...item, endMs: 2300, durationMs: 1300 } : item) })).not.toBe(fingerprint);
     expect(mergeStateCanRecover({
       version: 1,
       fingerprint,

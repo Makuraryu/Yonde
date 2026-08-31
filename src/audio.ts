@@ -8,6 +8,7 @@ import type { AppConfig, VoiceProfile } from "./config";
 import type { TranslatedParagraph } from "./text";
 import { splitForTts } from "./text";
 import { ProgressBar } from "./progress";
+import { buildTimeline, lyricsCues, prependLyricsTag, renderLrc, type AudioTimelineItem, type LyricsCue } from "./lyrics";
 import { atomicWrite, readJson, writeJson } from "./state";
 
 type AudioItem = { kind: string; text?: string; path: string };
@@ -15,13 +16,13 @@ type AudioSpec = { kind: string; text: string; profile: VoiceProfile };
 type PlannedItem = { type: "audio"; spec: AudioSpec } | { type: "separator" };
 type SynthesisResult = { path: string; cached: boolean };
 type AudioManifest = {
-  version: 3;
+  version: 4;
   mergeFingerprint: string;
   profiles: AppConfig["audio"]["profiles"];
   paragraphSequence: string[];
   sentenceSequence: string[];
   separator: AppConfig["audio"]["separator"];
-  items: AudioItem[];
+  items: AudioTimelineItem[];
 };
 type MergeState = {
   version: 1;
@@ -111,6 +112,23 @@ async function runPool<T>(jobs: Array<() => Promise<T>>, concurrency: number, on
   return results;
 }
 
+async function audioDurationMs(path: string, ffprobePath: string): Promise<number> {
+  const probe = Bun.spawn([
+    ffprobePath, "-v", "error", "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1", path,
+  ], { stdout: "pipe", stderr: "pipe" });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    probe.exited,
+    new Response(probe.stdout).text(),
+    new Response(probe.stderr).text(),
+  ]);
+  const seconds = Number(stdout.trim());
+  if (exitCode !== 0 || !Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`无法读取音频片段时长（${path}）: ${stderr.trim() || stdout.trim() || `退出码 ${exitCode}`}`);
+  }
+  return seconds * 1000;
+}
+
 function escapeConcatPath(path: string): string {
   return path.replace(/'/g, "'\\''");
 }
@@ -158,10 +176,11 @@ async function estimateDurationSeconds(items: AudioItem[]): Promise<number> {
   return Math.max(1, bytes * 8 / 96_000);
 }
 
-async function installMergedOutput(source: string, outputPath: string): Promise<void> {
+async function installMergedOutput(source: string, outputPath: string, cues: LyricsCue[]): Promise<void> {
   const staged = `${outputPath}.${process.pid}.${randomUUID()}.tmp.mp3`;
   try {
-    await copyFile(source, staged);
+    if (cues.length > 0) await prependLyricsTag(source, staged, cues);
+    else await copyFile(source, staged);
     await rename(staged, outputPath);
   } catch (error) {
     await rm(staged, { force: true });
@@ -169,11 +188,11 @@ async function installMergedOutput(source: string, outputPath: string): Promise<
   }
 }
 
-async function recoverCompletedMerge(outputPath: string, stateDir: string, fingerprint: string): Promise<boolean> {
+async function recoverCompletedMerge(outputPath: string, stateDir: string, fingerprint: string, cues: LyricsCue[]): Promise<boolean> {
   const statePath = join(stateDir, "audio-merge-state.json");
   const state = await readJson<unknown>(statePath);
   if (!mergeStateCanRecover(state, fingerprint, outputPath) || !(await fileIsUsable(state.temporary))) return false;
-  await installMergedOutput(state.temporary, outputPath);
+  await installMergedOutput(state.temporary, outputPath, cues);
   await rm(dirname(state.temporary), { recursive: true, force: true });
   await rm(statePath, { force: true });
   for (const stale of await temporaryOutputs(outputPath)) await rm(stale, { force: true });
@@ -213,6 +232,7 @@ async function runFfmpeg(
   stateDir: string,
   ffmpegPath: string,
   fingerprint: string,
+  cues: LyricsCue[],
 ): Promise<void> {
   const listPath = join(stateDir, "concat.txt");
   const paths = items.map((item) => relative(stateDir, item.path));
@@ -233,7 +253,7 @@ async function runFfmpeg(
   } satisfies MergeState);
   const processResult = Bun.spawn([
     ffmpegPath, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "1", "-i", listPath,
-    "-c:a", "copy", "-progress", "pipe:1", "-nostats", temporary,
+    "-c:a", "copy", "-id3v2_version", "0", "-progress", "pipe:1", "-nostats", temporary,
   ], { stdout: "pipe", stderr: "pipe" });
   const progressReader = readFfmpegProgress(processResult.stdout, progress, expectedSeconds);
   const stderrReader = new Response(processResult.stderr).text();
@@ -255,7 +275,7 @@ async function runFfmpeg(
     expectedSeconds,
   } satisfies MergeState);
   progress.finish(`${items.length} 个片段`);
-  await installMergedOutput(temporary, outputPath);
+  await installMergedOutput(temporary, outputPath, cues);
   await rm(temporaryDir, { recursive: true, force: true });
   await rm(mergeStatePath, { force: true });
 }
@@ -316,6 +336,8 @@ export async function buildAudio(
 ): Promise<void> {
   const ffmpegPath = Bun.which("ffmpeg");
   if (!ffmpegPath) throw new Error("找不到 ffmpeg；请先安装 ffmpeg，或仅运行 --stage translate");
+  const ffprobePath = Bun.which("ffprobe");
+  if (!ffprobePath) throw new Error("找不到 ffprobe；请安装完整的 ffmpeg 工具包，或仅运行 --stage translate");
   const cacheDir = join(stateDir, "audio-cache");
   await mkdir(cacheDir, { recursive: true });
   const cacheEntries = await readdir(cacheDir);
@@ -381,20 +403,48 @@ export async function buildAudio(
     ? { kind: "separator", path: separatorPath! }
     : { kind: item.spec.kind, text: item.spec.text, path: generated.get(specHash(item.spec))! });
 
+  const uniquePaths = [...new Set(items.map((item) => item.path))];
+  const timelineProgress = new ProgressBar("时轴", uniquePaths.length);
+  let measured = 0;
+  let durationValues: number[];
+  try {
+    durationValues = await runPool(
+      uniquePaths.map((path) => () => audioDurationMs(path, ffprobePath)),
+      Math.min(config.audio.concurrency, 16),
+      () => {
+        measured += 1;
+        if (measured < uniquePaths.length) timelineProgress.update(measured, `${measured}/${uniquePaths.length} 个片段`);
+      },
+    );
+    timelineProgress.finish(`${uniquePaths.length} 个片段`);
+  } catch (error) {
+    timelineProgress.fail(`完成 ${measured}/${uniquePaths.length}`);
+    throw error;
+  }
+  const timeline = buildTimeline(items, new Map(uniquePaths.map((path, index) => [path, durationValues[index]])));
+  const cues = lyricsCues(timeline);
+
   const manifestBody = {
     profiles: config.audio.profiles,
     paragraphSequence: config.audio.paragraphSequence,
     sentenceSequence: config.audio.sentenceSequence,
     separator: config.audio.separator,
-    items,
+    items: timeline,
   };
   const mergeFingerprint = audioMergeFingerprint(manifestBody);
-  if (await recoverCompletedMerge(outputPath, stateDir, mergeFingerprint)) return;
+  const lrcPath = /\.mp3$/i.test(outputPath) ? outputPath.replace(/\.mp3$/i, ".lrc") : `${outputPath}.lrc`;
+  if (await recoverCompletedMerge(outputPath, stateDir, mergeFingerprint, cues)) {
+    await atomicWrite(lrcPath, renderLrc(cues));
+    console.log(`同步文本: ${lrcPath}`);
+    return;
+  }
   await discardStaleMerge(outputPath, stateDir);
   const stale = await temporaryOutputs(outputPath);
   if (stale.length) console.warn(`发现 ${stale.length} 个未完成的合并临时文件，将保留语音缓存并重新合并。`);
   for (const path of stale) await rm(path, { force: true });
-  const manifest: AudioManifest = { version: 3, mergeFingerprint, ...manifestBody };
+  const manifest: AudioManifest = { version: 4, mergeFingerprint, ...manifestBody };
   await writeJson(join(stateDir, "audio-manifest.json"), manifest);
-  await runFfmpeg(items, outputPath, stateDir, ffmpegPath, mergeFingerprint);
+  await runFfmpeg(items, outputPath, stateDir, ffmpegPath, mergeFingerprint, cues);
+  await atomicWrite(lrcPath, renderLrc(cues));
+  console.log(`同步文本: ${lrcPath}`);
 }

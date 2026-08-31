@@ -4,7 +4,7 @@ Yonde（読んで）是一个配置驱动的 Bun CLI：把日文文本翻译成�
 
 ## 快速开始
 
-需要 [Bun](https://bun.sh/) 1.3 或更新版本。生成 MP3 时还需要 `ffmpeg`；只运行翻译阶段则不需要。
+需要 [Bun](https://bun.sh/) 1.3 或更新版本。生成 MP3 时还需要完整的 `ffmpeg` 工具包（同时提供 `ffmpeg` 和 `ffprobe`）；只运行翻译阶段则不需要。
 
 ```bash
 bunx @makuraryu/yonde@latest init
@@ -141,10 +141,13 @@ package_asset = "uisfx/sounds/cinematic/select.mp3"
 默认输出到输入文件旁的 `output/`：
 
 - `<文件名>.listening.txt`：逐句双语听力稿
-- `<文件名>.listening.mp3`：合成音频
+- `<文件名>.listening.mp3`：合成音频，内嵌普通文本和同步文本 metadata
+- `<文件名>.listening.lrc`：带时间戳的兼容歌词文件
 - `.state/.../translation.json`：翻译检查点和动态术语表
 - `.state/.../audio-cache/`：TTS 片段缓存
-- `.state/.../audio-manifest.json`：实际音色、顺序和片段清单
+- `.state/.../audio-manifest.json`：实际音色、顺序、片段时长和时间轴
+
+MP3 内嵌标准 ID3v2.3 `USLT`（完整双语文本）和 `SYLT`（毫秒级同步文本）帧。时间戳根据每个实际 TTS/分隔音片段的时长和最终朗读顺序生成；支持同步文本的播放器可随播放进度显示当前句，不支持 `SYLT` 的播放器可使用同名 `.lrc` 文件。
 
 翻译缓存指纹包含输入内容、语言、模型、端点、提示词版本和分句规则，但不包含 API Key。音频缓存指纹包含文本、音色、语言、语速和音调。仅调整朗读顺序时，Yonde 会复用已有语音并重新合并。
 
